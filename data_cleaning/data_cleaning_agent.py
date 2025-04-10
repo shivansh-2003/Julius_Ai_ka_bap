@@ -352,7 +352,7 @@ def auto_clean_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict, str]:
     return cleaned_df, {"operations": operations, "applied": applied_operations}, analysis
 
 def main():
-    file_path = "/Users/shivanshmahajan/Desktop/data/data_cleaning/unclean_smartwatch_health_data.csv"
+    file_path = "/Users/shivanshmahajan/Desktop/data/sample_data/unclean_smartwatch_health_data.csv"
     df = load_data(file_path)
 
     print("\n=== Initial Data Preview ===\n")

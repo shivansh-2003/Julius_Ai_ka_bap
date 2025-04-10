@@ -4,3 +4,16 @@ langchain
 python-dotenv
 langchain-openai
 scipy
+streamlit
+plotly
+seaborn
+matplotlib
+numpy
+langchain-anthropic
+langchain-experimental
+tabulate
+pillow
+google-generativeai
+streamlit-chat
+scikit-learn
+statsmodels
