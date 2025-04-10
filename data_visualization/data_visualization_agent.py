@@ -132,6 +132,11 @@ with st.sidebar:
     - Custom visualization requests
     """)
 
+# Set matplotlib backend to prevent non-interactive warnings
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+plt.ioff()  # Turn off interactive mode
+
 # Load data based on file path
 def load_data(file):
     file_name = file.name
@@ -865,7 +870,78 @@ def custom_query_section(df, llm):
             if sql_query and df is not None:
                 # Process SQL-like query
                 result = process_sql_like_query(df, sql_query)
+                
+                # Display result
+                st.write("### Query Results")
                 st.dataframe(result)
+                
+                # Visualize result if possible
+                if len(result) > 0:
+                    st.write("### Visualization of Results")
+                    
+                    # Determine best visualization based on result shape
+                    num_cols = result.select_dtypes(include=['int64', 'float64']).columns
+                    cat_cols = result.select_dtypes(include=['object', 'category']).columns
+                    
+                    # Case 1: One category column and one numeric column - Bar chart
+                    if len(cat_cols) == 1 and len(num_cols) == 1:
+                        fig = px.bar(
+                            result, 
+                            x=cat_cols[0], 
+                            y=num_cols[0],
+                            title=f"{num_cols[0]} by {cat_cols[0]}",
+                            text_auto='.2f'
+                        )
+                        fig.update_traces(textposition='outside')
+                        st.plotly_chart(fig, use_container_width=True, key="sql_bar_chart")
+                    
+                    # Case 2: One numeric column - Histogram
+                    elif len(num_cols) == 1:
+                        fig = px.histogram(
+                            result, 
+                            x=num_cols[0],
+                            title=f"Distribution of {num_cols[0]}",
+                            marginal="box"
+                        )
+                        st.plotly_chart(fig, use_container_width=True, key="sql_histogram")
+                    
+                    # Case 3: Two numeric columns - Scatter plot
+                    elif len(num_cols) >= 2:
+                        fig = px.scatter(
+                            result, 
+                            x=num_cols[0], 
+                            y=num_cols[1],
+                            title=f"Relationship between {num_cols[0]} and {num_cols[1]}",
+                            trendline="ols" if len(result) > 2 else None
+                        )
+                        st.plotly_chart(fig, use_container_width=True, key="sql_scatter")
+                    
+                    # Case 4: More complex result - Multiple visualizations
+                    elif len(result.columns) > 2:
+                        # Offer different visualization options
+                        viz_type = st.selectbox(
+                            "Select visualization type",
+                            ["Table View", "Correlation Heatmap", "Pair Plot"],
+                            key="sql_viz_type"
+                        )
+                        
+                        if viz_type == "Correlation Heatmap" and len(num_cols) > 1:
+                            corr = result[num_cols].corr()
+                            fig = px.imshow(
+                                corr,
+                                text_auto=True,
+                                color_continuous_scale="RdBu_r",
+                                title="Correlation Matrix"
+                            )
+                            st.plotly_chart(fig, use_container_width=True, key="sql_corr_heatmap")
+                        
+                        elif viz_type == "Pair Plot" and len(num_cols) > 1:
+                            fig = px.scatter_matrix(
+                                result,
+                                dimensions=num_cols[:4],  # Limit to 4 dimensions for readability
+                                title="Pair Plot"
+                            )
+                            st.plotly_chart(fig, use_container_width=True, key="sql_pair_plot")
     
     elif query_type == "Advanced Query":
         st.markdown("**Advanced Data Manipulation**")
@@ -893,6 +969,11 @@ def custom_query_section(df, llm):
             ["None", "Sum", "Mean", "Median", "Min", "Max"], 
             key="agg_method_selectbox")
         
+        # Group by (optional)
+        group_by = st.selectbox("Group By (optional)", 
+            ["None"] + list(df.select_dtypes(include=['object', 'category']).columns), 
+            key="group_by_selectbox")
+        
         if st.button("Apply Advanced Query", key="advanced_query_button"):
             result_df = df.copy()
             
@@ -903,13 +984,8 @@ def custom_query_section(df, llm):
                 except Exception as e:
                     st.error(f"Error in filtering: {e}")
             
-            # Apply sorting
-            if sort_column != "None":
-                ascending = sort_order == "Ascending"
-                result_df = result_df.sort_values(by=sort_column, ascending=ascending)
-            
-            # Apply aggregation
-            if agg_column != "None" and agg_method != "None":
+            # Apply grouping and aggregation
+            if group_by != "None" and agg_column != "None" and agg_method != "None":
                 agg_funcs = {
                     "Sum": "sum",
                     "Mean": "mean", 
@@ -918,11 +994,84 @@ def custom_query_section(df, llm):
                     "Max": "max"
                 }
                 try:
-                    result_df = result_df.groupby(result_df.columns.drop(agg_column).tolist())[agg_column].agg(agg_funcs[agg_method])
+                    result_df = result_df.groupby(group_by)[agg_column].agg(agg_funcs[agg_method]).reset_index()
                 except Exception as e:
                     st.error(f"Error in aggregation: {e}")
             
+            # Apply sorting
+            if sort_column != "None":
+                ascending = sort_order == "Ascending"
+                result_df = result_df.sort_values(by=sort_column, ascending=ascending)
+            
+            # Display result
+            st.write("### Query Results")
             st.dataframe(result_df)
+            
+            # Visualize result
+            if len(result_df) > 0:
+                st.write("### Visualization of Results")
+                
+                # Choose appropriate visualization based on query type
+                if group_by != "None" and agg_column != "None" and agg_method != "None":
+                    # Aggregation result - Bar chart
+                    fig = px.bar(
+                        result_df,
+                        x=group_by,
+                        y=agg_column,
+                        title=f"{agg_method} of {agg_column} by {group_by}",
+                        text_auto='.2f'
+                    )
+                    fig.update_traces(textposition='outside')
+                    st.plotly_chart(fig, use_container_width=True, key="advanced_bar_chart")
+                
+                elif filter_column != "None" and filter_condition:
+                    # Filtered result - Show appropriate chart based on columns
+                    numeric_cols = result_df.select_dtypes(include=['int64', 'float64']).columns
+                    
+                    if len(numeric_cols) >= 2:
+                        # Scatter plot for two numeric columns
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            x_col = st.selectbox("X-axis", numeric_cols, key="adv_scatter_x")
+                        with col2:
+                            y_col = st.selectbox("Y-axis", [c for c in numeric_cols if c != x_col], key="adv_scatter_y")
+                        
+                        fig = px.scatter(
+                            result_df,
+                            x=x_col,
+                            y=y_col,
+                            title=f"Scatter Plot: {x_col} vs {y_col}",
+                            trendline="ols"
+                        )
+                        st.plotly_chart(fig, use_container_width=True, key="advanced_scatter")
+                    
+                    elif len(numeric_cols) == 1:
+                        # Histogram for one numeric column
+                        fig = px.histogram(
+                            result_df,
+                            x=numeric_cols[0],
+                            title=f"Distribution of {numeric_cols[0]}",
+                            marginal="box"
+                        )
+                        st.plotly_chart(fig, use_container_width=True, key="advanced_histogram")
+                
+                # For general results, show summary statistics
+                if len(result_df.select_dtypes(include=['int64', 'float64']).columns) > 0:
+                    st.write("### Summary Statistics")
+                    st.dataframe(result_df.describe())
+                    
+                    # Correlation heatmap for numeric columns if multiple exist
+                    num_cols = result_df.select_dtypes(include=['int64', 'float64']).columns
+                    if len(num_cols) > 1:
+                        st.write("### Correlation Heatmap")
+                        corr = result_df[num_cols].corr()
+                        fig = px.imshow(
+                            corr,
+                            text_auto=True,
+                            color_continuous_scale="RdBu_r",
+                            title="Correlation Matrix"
+                        )
+                        st.plotly_chart(fig, use_container_width=True, key="advanced_corr_heatmap")
 
 # Generate Python code for analysis
 def generate_code_section(df):
@@ -1176,7 +1325,8 @@ def run_app():
             "Health Smartwatch Data (unclean)",
             "Iris Flower Dataset",
             "Titanic Passenger Data",
-            "Boston Housing Prices"
+            "Boston Housing Prices",
+            "Medical Insurance Costs"
         ]
         demo_selection = st.selectbox("Select a sample dataset:", ["None"] + demo_options)
         
@@ -1246,6 +1396,10 @@ def run_app():
                 elif demo_selection == "Titanic Passenger Data":
                     demo_data = pd.read_csv("https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv")
                     data_source = "Titanic Passenger Data"
+                
+                elif demo_selection == "Medical Insurance Costs":
+                    demo_data = pd.read_csv("https://raw.githubusercontent.com/stedy/Machine-Learning-with-R-datasets/master/insurance.csv")
+                    data_source = "Medical Insurance Costs"
                 
                 elif demo_selection == "Boston Housing Prices":
                     # Load Boston Housing dataset
@@ -1327,6 +1481,84 @@ def run_app():
         for i in range(1, 5):
             with main_tabs[i]:
                 st.info("Please load data in the 'Data Upload' tab to enable this feature.")
+
+def process_natural_language_query(df, query, llm):
+    """
+    Process a natural language query about the dataframe using the LLM.
+    
+    Args:
+        df (pd.DataFrame): The dataframe to query
+        query (str): Natural language query
+        llm: Language model to use
+        
+    Returns:
+        str: Response from the LLM
+    """
+    try:
+        # Create pandas agent with verbose=False to suppress detailed logs
+        agent = create_pandas_dataframe_agent(
+            llm, 
+            df, 
+            agent_type="tool-calling", 
+            verbose=False, 
+            allow_dangerous_code=True
+        )
+        
+        # Enhanced prompt for better results
+        prompt = f"""
+        Here is a natural language query about a pandas DataFrame: "{query}"
+        
+        Columns in the DataFrame: {', '.join(df.columns.tolist())}
+        
+        Please:
+        1. Understand the user's intent
+        2. Perform the necessary analysis or query on the DataFrame
+        3. If appropriate, suggest a visualization
+        4. Provide a clear, concise answer with relevant insights
+        5. If possible, generate Python code for the analysis
+        
+        Be specific and use the DataFrame's actual columns and data.
+        """
+        
+        # Invoke the agent
+        response = agent.invoke(prompt)
+        
+        # Extract the output
+        result = response.get('output', 'No insights generated.')
+        
+        # Try to generate a visualization if possible
+        try:
+            # Look for Python code blocks in the response
+            code_blocks = re.findall(r'```python(.*?)```', result, re.DOTALL)
+            if code_blocks:
+                with st.expander("Generated Visualization", expanded=True):
+                    for i, code in enumerate(code_blocks[:1]):  # Just show first viz
+                        # Create a temporary environment to safely execute the code
+                        local_vars = {
+                            'df': df, 
+                            'px': px, 
+                            'np': np, 
+                            'pd': pd, 
+                            'plt': plt, 
+                            'sns': sns
+                        }
+                        try:
+                            # Execute the code
+                            exec(code, globals(), local_vars)
+                            if 'fig' in local_vars:
+                                st.plotly_chart(local_vars['fig'], use_container_width=True, key=f"nl_query_viz_{i}")
+                            elif 'plt' in locals():
+                                st.pyplot(plt)
+                        except Exception as e:
+                            st.warning(f"Could not generate visualization: {str(e)}")
+        except:
+            pass  # Skip if visualization extraction fails
+        
+        return result
+    
+    except Exception as e:
+        st.error(f"Error processing natural language query: {str(e)}")
+        return f"Error: {str(e)}"
 
 if __name__ == "__main__":
     run_app()
